@@ -1,39 +1,48 @@
--- create table stream_points as select gid, (ST_DumpPoints(geom)).geom,  ST_AsText((ST_DumpPoints(geom)).geom) from hubbardnhd where gid = 106 OR gid = 94;
-
 -- create table to hold all points of polylines plus gids
 -- this dataset appears to have exact overlap between adjacent polylines
-CREATE SEQUENCE stream_points_sequence CYCLE;
-drop table if exists stream_points;
-create table stream_points as select nextval('stream_points_sequence'::regclass) as point_id, gid, (ST_DumpPoints(geom)).geom, (st_dumppoints(geom)).path[2],  ST_AsText((ST_DumpPoints(geom)).geom) from hubbardnhd;
-create index stream_points_index ON stream_points using GIST (geom);
+create sequence reach_points_sequence cycle;
+drop table if exists reach_points;
+create table reach_points as select nextval('stream_points_sequence'::regclass) as point_id, gid, (ST_DumpPoints(geom)).geom, (st_dumppoints(geom)).path[2],  ST_AsText((ST_DumpPoints(geom)).geom) from hubbardnhd;
+create index reach_points_index ON stream_points using GIST (geom);
 
--- this is also not quite right
--- create table stream_points as select row_number() over (order by gid, (st_dumppoints(geom)).path[2]) as point_id, gid, (ST_DumpPoints(geom)).geom, (st_dumppoints(geom)).path[2],  ST_AsText((ST_DumpPoints(geom)).geom) from hubbardnhd;
+-- find all points that are contained in two reaches
+-- ie all the connecting points
+drop table if exists reach_connections;
+create table reach_connections as select s1.point_id, s1.gid s1_gid, s1.path, s2.gid s2_gid from reach_points s1,  reach_points s2 where st_equals(s1.geom, s2.geom) and s1.gid != s2.gid;
 
-drop table if exists stream_adjacencies;
-create table stream_adjacencies as select s1.point_id, s1.gid s1_gid, s1.path, s2.gid s2_gid from stream_points s1,  stream_points s2 where st_equals(s1.geom, s2.geom) and s1.gid != s2.gid;
+-- reach connetions contains all connections, bidirectionally joined
+-- what we want is a table of these nodes, and a table of which reaches are connected to them
+drop table if exists reach_nodes;
+create sequence reach_nodes_sequence cycle;
+create table reach_nodes as select nextval('reach_nodes_sequence'::regclass) as id, ST_POINT(ST_X(geom), ST_Y(geom)) as node from (select distinct geom from  reach_connections join reach_points on reach_connections.point_id = reach_points.point_id ) reach_connections_geom;
+
+-- and now use the fact that each node is a spatial 'bucket' to get all the reaches connected to each node
+create sequence reach_adjacencies_sequence cycle;
+drop table if exists reach_adjacencies;
+create table reach_adjacencies as select nextval('reach_adjacencies_sequence'), gid, node_id from (select distinct gid, reach_nodes.id as node_id from reach_nodes, reach_points where st_equals(reach_nodes.node, reach_points.geom)) points;
 
 -- then find reaches that only have a single connected point
 -- these are the first order ones
 
-select s1_gid, count(distinct point_id) from stream_adjacencies group by s1_gid having count(distinct point_id) = 1;
-
 alter table hubbardnhd add column stream_order int;
+update hubbardnhd set stream_order = -1;
+update hubbardnhd set stream_order = 1 from ( select gid from reach_adjacencies group by gid having count(gid) = 1 ) zero_order where zero_order.gid = hubbardnhd.gid;
 
--- locate the start of the first order streams
-update hubbardnhd set stream_order = 1 from ( select s1_gid, count(distinct point_id) from stream_adjacencies group by s1_gid having count(distinct point_id) = 1 ) first_order where first_order.s1_gid = hubbardnhd.gid;
+-- and now data is ready for the standard stahler algorithm
+-- this algorithm could possibly be implemented within postgis as a function
+-- but we'll handle it in python for now
+-- do we need to flip it back to a graph where the reachs are the nodes ?
+-- right now we have to go through 3 tables, should only be 2..
 
--- and walk all the 1st order streams up to their first join
-alter table stream_adjacencies add column stream_order int;
-update stream_adjacencies set stream_order = 1 from ( select s1_gid, count(distinct point_id) from stream_adjacencies group by s1_gid having count(distinct point_id) = 1 ) first_order where first_order.s1_gid = stream_adjacencies.s1_gid;
 
-select s1_gid, count(distinct point_id) from stream_adjacencies group by s1_gid having count(distinct point_id) = 1;
--- update any s2_gid that only have connections to only 2 other reaches 
--- because a join will always be with 2 or more streams
--- once this is done, do a final detection on connections to 3 streams but not yet stream order tagged, 
--- this is the stopper
+-- what we REALLY need are the zero order nodes
 
-update stream_adjacencies set stream_order = 1 from ( select s1_gid, count(distinct point_id) from stream_adjacencies group by s1_gid having count(distinct point_id) = 2 ) first_order where first_order.s1_gid = stream_adjacencies.s1_gid;
 
--- TODO change all 'streams' to 'reaches', and change 'point_id' to 'connection_id'
+-- for fun, here's playing around in the db
+alter table reach_nodes add column node_order int;
+update reach_nodes set node_order = -1;
+
+update reach_nodes set node_order = 1 from (
+select reach_adjacencies.node_id from reach_adjacencies join ( select node_id from reach_adjacencies r_a join hubbardnhd h on h.gid = r_a.gid where h.stream_order = 1 ) nodes_with_first_order on reach_adjacencies.node_id = nodes_with_first_order.node_id group by reach_adjacencies.node_id having count(reach_adjacencies.node_id) = 2
+) first_order where first_order.node_id = reach_nodes.id;
 
