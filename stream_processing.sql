@@ -10,9 +10,6 @@ create index reach_points_index ON stream_points using GIST (geom);
 drop table if exists reach_connections;
 create table reach_connections as select s1.point_id, s1.gid s1_gid, s1.path, s2.gid s2_gid from reach_points s1,  reach_points s2 where st_equals(s1.geom, s2.geom) and s1.gid != s2.gid;
 
--- find all the nodes
---select distinct geom from ( select distinct(geom) from reach_points, (select gid, max(path) path from reach_points group by gid) max_path_points where reach_points.gid = max_path_points.gid and reach_points.path = max_path_points.path UNION select geom from reach_points where path = 1) all_geoms ;
-
 -- reach connetions contains all connections, bidirectionally joined
 -- what we want is a table of these nodes, and a table of which reaches are connected to them
 drop table if exists reach_nodes;
@@ -37,12 +34,9 @@ create sequence reach_adjacencies_sequence cycle;
 drop table if exists reach_adjacencies;
 create table reach_adjacencies as select nextval('reach_adjacencies_sequence'), gid, node_id from (select distinct gid, reach_nodes.id as node_id from reach_nodes, reach_points where st_equals(reach_nodes.node, reach_points.geom)) points;
 
--- then find reaches that only have a single connected point
--- these are the first order ones
-
+-- prepare tables
 alter table hubbardnhd add column stream_order int;
 update hubbardnhd set stream_order = -1;
---update hubbardnhd set stream_order = 1 from ( select gid from reach_adjacencies group by gid having count(gid) = 1 ) zero_order where zero_order.gid = hubbardnhd.gid;
 
 alter table reach_nodes add column node_order int;
 update reach_nodes set node_order = -1;
@@ -50,9 +44,3 @@ update reach_nodes set node_order = -1;
 -- update zero order nodes (set as order = 1, for downstream reach)
 update reach_nodes set node_order = 1 from ( select node_id from reach_adjacencies group by node_id having count(gid) = 1 ) nodes where reach_nodes.id = nodes.node_id;
 
---update reach_nodes set node_order = 1 from (
---select reach_adjacencies.node_id from reach_adjacencies join ( select node_id from reach_adjacencies r_a join hubbardnhd h on h.gid = r_a.gid where h.stream_order = 1 ) nodes_with_first_order on reach_adjacencies.node_id = nodes_with_first_order.node_id group by reach_adjacencies.node_id having count(reach_adjacencies.node_id) = 2
---) first_order where first_order.node_id = reach_nodes.id;
-
--- fixing up missing nodes
---select distinct geom from ( select distinct(geom) from reach_points, (select gid, max(path) path from reach_points group by gid) max_path_points where reach_points.gid = max_path_points.gid and reach_points.path = max_path_points.path UNION select geom from reach_points where path = 1)all_geoms ;
