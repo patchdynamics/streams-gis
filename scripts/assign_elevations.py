@@ -13,3 +13,4 @@ update = "update %s " % (junctions_table) + " junctions " \
 					"WHERE junctions.gid = junctions2.gid"
 print update
 
+
