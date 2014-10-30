@@ -1,5 +1,9 @@
-print 'Hello, World'
+#!/usr/bin/python
+print 'Here we go!'
 import psycopg2
+
+junctions_table = "farmington hydro net junctions"
+streams_table = "farmington_streams"
 
 class Node():
 	def __init__(self):
@@ -32,14 +36,28 @@ class Node():
 
 unvisited = dict()
 assigned = dict()
-orders = 0
 transmitted = list()
+orders = 0
 
 conn = psycopg2.connect(database="streams", password="", host="127.0.0.1", port="5432")
 cur = conn.cursor()
 
-cur.execute("select id, node_order, count(reach_adjacencies.nextval) - 1 as children_number from reach_nodes join reach_adjacencies on reach_adjacencies.node_id = reach_nodes.id group by id, node_order")
+cur.execute("update \"" + junctions_table +"\" set node_order = -1");
+cur.execute("update \"" + streams_table +"\" set stream_order = -1");
 
+# assign the first over nodes
+update = "update \"" + junctions_table +"\" junctions " \
+						"set node_order = 1 where gid in ( " \
+						"select node_id from reach_adjacencies group by node_id having count(stream_id) = 1 " \
+						") "
+cur.execute( update )
+
+# if flow direction is taken into considering, raach_adjacencies would not have the upstream connection, 
+# so children_number wouldn't need to subtract 1
+cur.execute("select gid, node_order, count(reach_adjacencies.nextval) - 1 as children_number from \""  + junctions_table + "\" junctions "
+						"join reach_adjacencies on reach_adjacencies.node_id = junctions.gid group by gid, node_order")
+
+# load the nodes
 row = cur.fetchone()
 while row != None:
 	node = Node()
@@ -60,9 +78,11 @@ while row != None:
 
 cur.close()
 
+# Run the stream ordering algorithm 
 cur = conn.cursor()
 while True:
 	node = None
+	# find next node in list that has not been moved to 'assigned'
 	list_order = 0
 	for i in range(1, orders+1):
 		list_order = i
@@ -76,14 +96,25 @@ while True:
 	print len(assigned[list_order])
 	del assigned[list_order][0]
 
-	cur.execute("select ra2.node_id, ra1.gid from reach_adjacencies ra1, reach_adjacencies ra2, reach_nodes rn where ra1.gid = ra2.gid and ra1.node_id = %s and rn.id = ra2.node_id and rn.node_order = -1", [node.id])
+	# get nodes connected to this node that haven't been assigned yet
+	query = "select ra2.node_id, ra1.stream_id from reach_adjacencies ra1, reach_adjacencies ra2, \""  + junctions_table + "\" junctions " \
+					"where ra1.stream_id = ra2.stream_id and ra1.node_id = %s and junctions.gid = ra2.node_id and junctions.node_order = -1" % (node.id)
+	print query
+	cur.execute(query)
 
 	row = cur.fetchone()
+	if row == None:
+		# either we've got a disconnected segment, or there's an error in the data
+		# note in the logs, then move on
+		print "Detected a disconnected segment attached to node id %d " % node.id
+		continue
+
+		
 	father_node = unvisited[row[0]]
 	outflow_gid = row[1]
 
 	# we can transmit to the reach here
-	cur.execute("update hubbardnhd set stream_order = %s where gid = %s", [list_order, outflow_gid])
+	cur.execute("update " + streams_table + " set stream_order = %s where gid = %s", [list_order, outflow_gid])
 
 	father_node.children_orders.append(node.order)
 	if len(father_node.children_orders) == father_node.children_number:
@@ -101,7 +132,7 @@ while True:
 		assigned[father_node.order].append(father_node)
 		print "put", father_node.id, " in", father_node.order
 		# update in the database
-		cur.execute("update reach_nodes set node_order = %s where id = %s", [father_node.order, father_node.id])
+		cur.execute("update \""  + junctions_table + "\" set node_order = %s where gid = %s", [father_node.order, father_node.id])
 		
 		print "del unvisited %s",  father_node.id
 		del unvisited[father_node.id]

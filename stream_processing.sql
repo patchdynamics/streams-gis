@@ -34,6 +34,15 @@ create sequence reach_adjacencies_sequence cycle;
 drop table if exists reach_adjacencies;
 create table reach_adjacencies as select nextval('reach_adjacencies_sequence'), gid, node_id from (select distinct gid, reach_nodes.id as node_id from reach_nodes, reach_points where st_equals(reach_nodes.node, reach_points.geom)) points;
 
+-- for the farmington
+drop table if exists reach_adjacencies;
+create table reach_adjacencies as select nextval('reach_adjacencies_sequence'), stream_id, node_id 
+from (
+	select distinct streams.gid as stream_id, junctions.gid as node_id 
+	from farmington_streams streams, "farmington hydro net junctions" junctions
+	where st_contains(streams.geom, junctions.geom)
+) segment_junctions;
+
 -- prepare tables
 alter table hubbardnhd add column stream_order int;
 update hubbardnhd set stream_order = -1;
