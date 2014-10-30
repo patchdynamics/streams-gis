@@ -11,6 +11,7 @@ class Node():
 		self.order = -1
 		self.children_orders = []
 		self.children_number = -1
+		self.base_stream_id = -1 # for consolidating stream segments
 	
 	def calculate_reach_order(self):
 		if len(self.children_orders) != self.children_number:
@@ -44,6 +45,8 @@ cur = conn.cursor()
 
 cur.execute("update \"" + junctions_table +"\" set node_order = -1");
 cur.execute("update \"" + streams_table +"\" set stream_order = -1");
+cur.execute("update \"" + junctions_table +"\" set base_stream_id = -1");
+cur.execute("update \"" + streams_table +"\" set base_stream_id = -1");
 
 # assign the first over nodes
 update = "update \"" + junctions_table +"\" junctions " \
@@ -52,10 +55,13 @@ update = "update \"" + junctions_table +"\" junctions " \
 						") "
 cur.execute( update )
 
-# if flow direction is taken into considering, raach_adjacencies would not have the upstream connection, 
+
+# if flow direction is taken into considering, reach_adjacencies would not have the upstream connection, 
 # so children_number wouldn't need to subtract 1
 cur.execute("select gid, node_order, count(reach_adjacencies.nextval) - 1 as children_number from \""  + junctions_table + "\" junctions "
 						"join reach_adjacencies on reach_adjacencies.node_id = junctions.gid group by gid, node_order")
+
+
 
 # load the nodes
 row = cur.fetchone()
@@ -64,6 +70,10 @@ while row != None:
 	node.id = row[0]
 	node.order = row[1]
 	node.children_number = row[2]
+	cur2 = conn.cursor()
+	cur2.execute("select nextval('base_stream_id_sequences') ")
+	seq = cur2.fetchone()
+	node.base_stream_id = seq[0]
 	
 	if node.order == -1:
 		unvisited[node.id] = node
@@ -93,13 +103,13 @@ while True:
 		break
 
 	# remove from assigned
-	print len(assigned[list_order])
+	#print len(assigned[list_order])
 	del assigned[list_order][0]
 
 	# get nodes connected to this node that haven't been assigned yet
 	query = "select ra2.node_id, ra1.stream_id from reach_adjacencies ra1, reach_adjacencies ra2, \""  + junctions_table + "\" junctions " \
 					"where ra1.stream_id = ra2.stream_id and ra1.node_id = %s and junctions.gid = ra2.node_id and junctions.node_order = -1" % (node.id)
-	print query
+	#print query
 	cur.execute(query)
 
 	row = cur.fetchone()
@@ -115,27 +125,49 @@ while True:
 
 	# we can transmit to the reach here
 	cur.execute("update " + streams_table + " set stream_order = %s where gid = %s", [list_order, outflow_gid])
+	print "writing %i" % node.base_stream_id
+	query = "update " + streams_table + " set base_stream_id = %s where gid = %s" % (node.base_stream_id, outflow_gid)
+	print query
+	cur.execute(query)
+	conn.commit()
 
 	father_node.children_orders.append(node.order)
 	if len(father_node.children_orders) == father_node.children_number:
 		# we have all the children, calculate the reach order
-		print "calc order"
-		print father_node.id
-		for p in father_node.children_orders:
-			print "child ", p
-		print "children num", father_node.children_number
+		#print "calc order"
+		#print father_node.id
+		#for p in father_node.children_orders:
+		#	print "child ", p
+		#print "children num", father_node.children_number
 		order = father_node.calculate_reach_order()	
 		father_node.order = order
 		if order not in assigned:
 			assigned[order] = list()
 			orders = order
-		assigned[father_node.order].append(father_node)
-		print "put", father_node.id, " in", father_node.order
+		#print "put", father_node.id, " in", father_node.order
 		# update in the database
 		cur.execute("update \""  + junctions_table + "\" set node_order = %s where gid = %s", [father_node.order, father_node.id])
-		
-		print "del unvisited %s",  father_node.id
+
+		if father_node.children_number > 1:
+			print "assigning new base stream id %i" % father_node.base_stream_id 
+			print father_node.children_number
+			cur2 = conn.cursor()
+			cur2.execute("select nextval('base_stream_id_sequences') ")
+			seq = cur2.fetchone()
+			father_node.base_stream_id = seq[0]
+		else:
+			father_node.base_stream_id = node.base_stream_id
+			print "transmitting base stream id %i" % father_node.base_stream_id 
+
+		assigned[father_node.order].append(father_node)
+
+		#print "del unvisited %s",  father_node.id
 		del unvisited[father_node.id]
+
+	else:
+		father_node.base_stream_id = node.base_stream_id
+		print "transmitting base stream id %i" % father_node.base_stream_id 
+
 
 	transmitted.append(node)
 conn.commit()
