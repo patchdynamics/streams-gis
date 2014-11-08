@@ -2,8 +2,8 @@
 print 'Here we go!'
 import psycopg2
 
-junctions_table = "farmington hydro net junctions"
-streams_table = "farmington_streams"
+junctions_table = "hubbard_net_junctions"
+streams_table = "hubbardnhd"
 
 class Node():
 	def __init__(self):
@@ -45,7 +45,6 @@ cur = conn.cursor()
 
 cur.execute("update \"" + junctions_table +"\" set node_order = -1");
 cur.execute("update \"" + streams_table +"\" set stream_order = -1");
-cur.execute("update \"" + junctions_table +"\" set base_stream_id = -1");
 cur.execute("update \"" + streams_table +"\" set base_stream_id = -1");
 
 # assign the first over nodes

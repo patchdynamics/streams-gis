@@ -11,6 +11,7 @@ update = "update %s " % (junctions_table) + " junctions " \
 					"SET elevation = ST_VALUE(rast, junctions.geom) " \
 					"FROM  \"%s\" junctions2 CROSS JOIN \"%s\" raster " % (junctions_table, raster_table) + " " \
 					"WHERE junctions.gid = junctions2.gid"
-print update
+cur.execute(update)
+conn.commit()
 
 

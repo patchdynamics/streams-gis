@@ -8,9 +8,13 @@ streams_table = "hubbardnhd"
 conn = psycopg2.connect(database="streams", password="", host="127.0.0.1", port="5432")
 cur = conn.cursor()
 
-cur.execute("alter table \"%s\" add column prepared_geom Geometry(Point)" % (junctions_table))
-cur.execute("alter table \"%s\" add column prepared_geom Geometry(MultiLineString)" % (streams_table))
-cur.execute("alter table \"%s\" add column base_stream_id integer" % (streams_table))
+if 0:
+	cur.execute("alter table \"%s\" add column prepared_geom Geometry(Point)" % (junctions_table))
+	cur.execute("alter table \"%s\" add column node_order integer" % (junctions_table))
+	cur.execute("alter table \"%s\" add column elevation decimal" % (junctions_table))
+	cur.execute("alter table \"%s\" add column prepared_geom Geometry(MultiLineString)" % (streams_table))
+	cur.execute("alter table \"%s\" add column base_stream_id integer" % (streams_table))
+	cur.execute("alter table \"%s\" add column stream_order integer" % (streams_table))
 
 cur.execute("update \"%s\" set prepared_geom = ST_SnapToGrid(ST_Force2d(geom), 0.00000001)" % (junctions_table))
 cur.execute("update \"%s\" set prepared_geom = ST_SnapToGrid(ST_Force2d(geom), 0.00000001)" % (streams_table))
@@ -22,6 +26,7 @@ cur.execute("create table reach_adjacencies as select nextval('reach_adjacencies
 		" from \"%s\" streams, \"%s\" junctions "
 		" where st_covers(streams.prepared_geom, junctions.prepared_geom) "
 		" and junctions.enabled = 1 "
+		" and streams.enabled = 1 "
 		") segment_junctions " % (streams_table, junctions_table) )
 
 
