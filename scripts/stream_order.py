@@ -2,8 +2,8 @@
 print 'Here we go!'
 import psycopg2
 
-junctions_table = "hubbard_net_junctions"
-streams_table = "hubbardnhd"
+junctions_table = "farmington_hydro_net_junctions"
+streams_table = "farmington_streams"
 
 class Node():
 	def __init__(self):
@@ -57,9 +57,18 @@ cur.execute( update )
 
 # if flow direction is taken into considering, reach_adjacencies would not have the upstream connection, 
 # so children_number wouldn't need to subtract 1
-cur.execute("select gid, node_order, count(reach_adjacencies.nextval) - 1 as children_number from \""  + junctions_table + "\" junctions "
-						"join reach_adjacencies on reach_adjacencies.node_id = junctions.gid group by gid, node_order")
-
+# this now takes elevation into account and doesn't subtract 1
+sql = " select junctions1.gid, junctions1.node_order, count(ra1.nextval) " \
+		"from reach_adjacencies ra1, reach_adjacencies ra2, " \
+		+ junctions_table + " junctions1 , " + junctions_table + " junctions2 " \
+		"where ra1.stream_id = ra2.stream_id " \
+		"and junctions1.gid = ra1.node_id " \
+		"and junctions2.gid = ra2.node_id " \
+		"and junctions1.elevation >= junctions2.elevation " \
+		"and junctions1.gid != junctions2.gid " \
+		"group by junctions1.gid, junctions1.node_order "
+print sql
+cur.execute(sql)
 
 
 # load the nodes
@@ -89,6 +98,7 @@ cur.close()
 
 # Run the stream ordering algorithm 
 cur = conn.cursor()
+cur2 = conn.cursor()
 while True:
 	node = None
 	# find next node in list that has not been moved to 'assigned'
@@ -106,69 +116,88 @@ while True:
 	del assigned[list_order][0]
 
 	# get nodes connected to this node that haven't been assigned yet
-	query = "select ra2.node_id, ra1.stream_id from reach_adjacencies ra1, reach_adjacencies ra2, \""  + junctions_table + "\" junctions " \
-					"where ra1.stream_id = ra2.stream_id and ra1.node_id = %s and junctions.gid = ra2.node_id and junctions.node_order = -1" % (node.id)
-	#print query
-	cur.execute(query)
+	# we are assuming for now only one father node (outflow), anabranched could have multiple
+	# only look at connections flowing down (higher elevation to lower elevation)
+	query = "select ra2.node_id, ra1.stream_id from reach_adjacencies ra1, reach_adjacencies ra2, " \
+					+ junctions_table + " junctions1 , " + junctions_table + " junctions2 " \
+					"where ra1.stream_id = ra2.stream_id " \
+					"and junctions1.gid = ra1.node_id " \
+					"and junctions2.gid = ra2.node_id " \
+					"and junctions1.elevation >= junctions2.elevation " \
+					"and junctions1.gid != junctions2.gid " \
+					"and ra1.node_id = %s "  \
+					"and junctions2.node_order = -1" % (node.id)
+	cur2.execute(query)
 
-	row = cur.fetchone()
+	row = cur2.fetchone()
 	if row == None:
 		# either we've got a disconnected segment, or there's an error in the data
 		# note in the logs, then move on
 		print "Detected a disconnected segment attached to node id %d " % node.id
 		continue
 
-		
-	father_node = unvisited[row[0]]
-	outflow_gid = row[1]
+	while row != None:
+		if row[0] in unvisited.keys():
+			father_node = unvisited[row[0]]
+		else:
+			print "Key for father node not found, possible elevation misordering: " + str(row[0])
+			row = cur2.fetchone()
+			continue
 
-	# we can transmit to the reach here
-	cur.execute("update " + streams_table + " set stream_order = %s where gid = %s", [list_order, outflow_gid])
-	print "writing %i" % node.base_stream_id
-	query = "update " + streams_table + " set base_stream_id = %s where gid = %s" % (node.base_stream_id, outflow_gid)
-	print query
-	cur.execute(query)
-	conn.commit()
+		father_node.children_orders.append(node.order)
+		#print len(father_node.children_orders) 
+		#print father_node.children_number
+		if len(father_node.children_orders) == father_node.children_number:
+			# we have all the children, calculate the reach order
+			#print father_node.id
+			#for p in father_node.children_orders:
+			#	print "child ", p
+			#print "children num", father_node.children_number
+			order = father_node.calculate_reach_order()	
+			father_node.order = order
+			if order not in assigned:
+				assigned[order] = list()
+				orders = order
+			#print "put", father_node.id, " in", father_node.order
+			# update in the database
+			cur.execute("update \""  + junctions_table + "\" set node_order = %s where gid = %s", [father_node.order, father_node.id])
 
-	father_node.children_orders.append(node.order)
-	if len(father_node.children_orders) == father_node.children_number:
-		# we have all the children, calculate the reach order
-		#print "calc order"
-		#print father_node.id
-		#for p in father_node.children_orders:
-		#	print "child ", p
-		#print "children num", father_node.children_number
-		order = father_node.calculate_reach_order()	
-		father_node.order = order
-		if order not in assigned:
-			assigned[order] = list()
-			orders = order
-		#print "put", father_node.id, " in", father_node.order
-		# update in the database
-		cur.execute("update \""  + junctions_table + "\" set node_order = %s where gid = %s", [father_node.order, father_node.id])
+			if father_node.children_number > 1:
+				#print "assigning new base stream id %i" % father_node.base_stream_id 
+				print father_node.children_number
+				cur2 = conn.cursor()
+				cur2.execute("select nextval('base_stream_id_sequences') ")
+				seq = cur2.fetchone()
+				father_node.base_stream_id = seq[0]
+			else:
+				father_node.base_stream_id = node.base_stream_id
+				#print "transmitting base stream id %i" % father_node.base_stream_id 
 
-		if father_node.children_number > 1:
-			print "assigning new base stream id %i" % father_node.base_stream_id 
-			print father_node.children_number
-			cur2 = conn.cursor()
-			cur2.execute("select nextval('base_stream_id_sequences') ")
-			seq = cur2.fetchone()
-			father_node.base_stream_id = seq[0]
+			assigned[father_node.order].append(father_node)
+
+			# we can transmit to the outflow reaches here
+			# get the ouflows and update them
+			cur.execute("update " + streams_table + " set stream_order = %s where gid = %s", [father_node.order, outflow_gid])
+			#print "writing %i" % node.base_stream_id
+			query = "update " + streams_table + " set base_stream_id = %s where gid = %s" % (father_node.base_stream_id, outflow_gid)
+			#print query
+			cur.execute(query)
+			conn.commit()
+
+
+
+			#print "del unvisited %s",  father_node.id
+			del unvisited[father_node.id]
+
 		else:
 			father_node.base_stream_id = node.base_stream_id
-			print "transmitting base stream id %i" % father_node.base_stream_id 
-
-		assigned[father_node.order].append(father_node)
-
-		#print "del unvisited %s",  father_node.id
-		del unvisited[father_node.id]
-
-	else:
-		father_node.base_stream_id = node.base_stream_id
-		print "transmitting base stream id %i" % father_node.base_stream_id 
+			#print "transmitting base stream id %i" % father_node.base_stream_id 
 
 
-	transmitted.append(node)
+		transmitted.append(node)
+		row = cur2.fetchone()
+
+
 conn.commit()
 
 # Now everything in the transmitted bucket is both assigned an order and transmitted forward

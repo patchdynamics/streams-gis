@@ -2,8 +2,8 @@
 print 'Gonna try to preprocess this..!'
 import psycopg2
 
-junctions_table = "hubbard_net_junctions"
-streams_table = "hubbardnhd"
+junctions_table = "farmington_hydro_net_junctions"
+streams_table = "farmington_streams"
 
 conn = psycopg2.connect(database="streams", password="", host="127.0.0.1", port="5432")
 cur = conn.cursor()
