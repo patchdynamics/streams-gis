@@ -1,0 +1,15 @@
+Steps to Process 
+================
+
+1) Clip a subset of hydro net junctions that matches the stream network to be analyzed.  Do this by creating a .001 thickness buffer layer on the stream network shapes, and processing the hydro net junctions layer for intersections with the buffer.
+
+2) Import stream and junctions shapes into postGIS
+shp2pgsql PassumpsicHydroNetJunctions.shp | psql streams
+shp2pgsql PassumpsicHIGH.shp | psql streams
+
+3) Run stream_preprocessing.sql  note: it's necessary to change the table names in this file
+python stream_preprocessing.py
+
+note: if you run this script repeatedly, you need to skip the lines that create new talbe columns
+
+4) Run the
