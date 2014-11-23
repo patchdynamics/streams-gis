@@ -4,7 +4,7 @@ create table consolidated_streams as
 select ST_CollectionHomogenize(ST_Collect(geom)) geom, base_stream_id, stream_order
 from (
 	select ST_Force2D(geom) geom, base_stream_id, stream_order 
-	from hubbardnhd where base_stream_id > -1
+	from passumpsichigh where base_stream_id > -1
 ) streams  
 group by base_stream_id, stream_order;
 
@@ -18,11 +18,11 @@ alter table consolidated_streams add column slope decimal;
 update consolidated_streams
 set min_elevation=min, max_elevation=max, length=sum
 from( 
-	select min(elevation) min, max(elevation) max, sum(lengthkm)*1000 sum, hubbardnhd.base_stream_id
-	from hubbardnhd, reach_adjacencies, hubbard_net_junctions junctions
-	where reach_adjacencies.stream_id = hubbardnhd.gid
+	select min(elevation) min, max(elevation) max, sum(lengthkm)*1000 sum, passumpsichigh.base_stream_id
+	from passumpsichigh, reach_adjacencies, passumpsic_junctions_fixed junctions
+	where reach_adjacencies.stream_id = passumpsichigh.gid
 	and reach_adjacencies.node_id = junctions.gid
-	group by hubbardnhd.base_stream_id
+	group by passumpsichigh.base_stream_id
 ) min_max
 where min_max.base_stream_id = consolidated_streams.base_stream_id;
 

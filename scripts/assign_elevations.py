@@ -1,8 +1,8 @@
 #!/usr/bin/python
 import psycopg2
 
-junctions_table = "hubbard_net_junctions"
-raster_table = "hubbard_watershed_dem"
+junctions_table = "passumpsic_junctions_fixed"
+raster_table = "passumpsicelevationswgs84"
 
 conn = psycopg2.connect(database="streams", password="", host="127.0.0.1", port="5432")
 cur = conn.cursor()

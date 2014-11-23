@@ -2,8 +2,8 @@
 print 'Here we go!'
 import psycopg2
 
-junctions_table = "hubbard_net_junctions"
-streams_table = "hubbardnhd"
+junctions_table = "passumpsic_junctions_fixed"
+streams_table = "passumpsichigh"
 
 class Node():
 	def __init__(self):
@@ -43,15 +43,15 @@ orders = 0
 conn = psycopg2.connect(database="streams", password="", host="127.0.0.1", port="5432")
 cur = conn.cursor()
 
-cur.execute("update \"" + junctions_table +"\" set node_order = -1");
+cur.execute("update \"" + junctions_table +"\" set node_order = -1 where node_order != -2");
 cur.execute("update \"" + streams_table +"\" set stream_order = -1");
 cur.execute("update \"" + streams_table +"\" set base_stream_id = -1");
 
-# assign the first over nodes
+# assign the first order nodes
 update = "update \"" + junctions_table +"\" junctions " \
 						"set node_order = 1 where gid in ( " \
 						"select node_id from reach_adjacencies group by node_id having count(stream_id) = 1 " \
-						") "
+						") and node_order != -2 "
 cur.execute( update )
 
 
@@ -133,19 +133,20 @@ while True:
 	father_node.children_orders.append(node.order)
 	if len(father_node.children_orders) == father_node.children_number:
 		# we have all the children, calculate the reach order
-		#print "calc order"
-		#print father_node.id
-		#for p in father_node.children_orders:
-		#	print "child ", p
-		#print "children num", father_node.children_number
+
+		if father_node.order == -2:
+			# this is the network outflow, don't propagate
+			continue
+
 		order = father_node.calculate_reach_order()	
 		father_node.order = order
 		if order not in assigned:
 			assigned[order] = list()
-			orders = order
-		#print "put", father_node.id, " in", father_node.order
+			if orders < order:
+				orders = order
 		# update in the database
 		cur.execute("update \""  + junctions_table + "\" set node_order = %s where gid = %s", [father_node.order, father_node.id])
+		print "%i now has order %i" % (father_node.id, father_node.order)
 
 		if father_node.children_number > 1:
 			print "assigning new base stream id %i" % father_node.base_stream_id 
