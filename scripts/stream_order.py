@@ -148,7 +148,9 @@ while True:
 		cur.execute("update \""  + junctions_table + "\" set node_order = %s where gid = %s", [father_node.order, father_node.id])
 		print "%i now has order %i" % (father_node.id, father_node.order)
 
-		if father_node.children_number > 1:
+		#if father_node.children_number > 1:
+		if father_node.order != node.order: 
+			# assign base_stream_id for consolidation when order changes at this node
 			print "assigning new base stream id %i" % father_node.base_stream_id 
 			print father_node.children_number
 			cur2 = conn.cursor()
