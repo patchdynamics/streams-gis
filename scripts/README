@@ -7,9 +7,17 @@ Steps to Process
 shp2pgsql PassumpsicHydroNetJunctions.shp | psql streams
 shp2pgsql PassumpsicHIGH.shp | psql streams
 
-3) Run stream_preprocessing.sql  note: it's necessary to change the table names in this file
+3) Run stream_preprocessing.py  note: it's necessary to change the table names in this file
 python stream_preprocessing.py
 
-note: if you run this script repeatedly, you need to skip the lines that create new talbe columns
+note: if you run this script repeatedly, you need to skip the lines that create new table columns
 
-4) Run the
+4) Run stream_order.py note: it's necessary to change the table names in this file 
+python stream_order.py
+
+5) Run assign_elevations.sql
+psql streams < assign_elevations.sql
+
+6) Run merge_lines.sql
+psql streams < merge_lines.sql
+
